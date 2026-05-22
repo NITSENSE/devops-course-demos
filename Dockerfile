@@ -1,28 +1,36 @@
-FROM python:3.12-slim
+FROM python:3.11-slim AS builder
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PORT=5000
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-ARG DEPLOY_REF
-ENV DEPLOY_REF=${DEPLOY_REF}
+WORKDIR /build
 
-WORKDIR /app
+RUN pip install --no-cache-dir --upgrade pip build
 
-RUN groupadd -g 10001 appgroup && \
-    useradd -u 10001 -g appgroup -m -s /bin/bash appuser
+COPY pyproject.toml README.md ./
+COPY todo_app/ ./todo_app/
 
-COPY requirements.txt .
+RUN python -m build --wheel --outdir dist
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+FROM python:3.11-slim
 
-COPY . .
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/home/appuser/.local/bin:$PATH"
 
-RUN chown -R appuser:appgroup /app
+RUN useradd --create-home appuser
+
+WORKDIR /home/appuser/app
+
+COPY --from=builder /build/dist/*.whl ./
+
+RUN chown -R appuser:appuser /home/appuser/app
 
 USER appuser
 
-EXPOSE 5000
+RUN pip install --no-cache-dir --user *.whl && \
+    rm *.whl
 
-CMD ["python", "-m", "flask", "run", "--host=0.0.0.0", "--port=5000"]
+ENTRYPOINT ["todo"]
+
+CMD ["--help"]
